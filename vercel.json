@@ -1,5 +1,5 @@
 {
-  "buildCommand": "git remote set-url origin https://x-access-token:$GITHUB_TOKEN@github.com/vanshsurti213-arch/firstframe-rooster.git && git lfs pull && pnpm run build",
+  "buildCommand": "git config --global url.\"https://x-access-token:$GITHUB_TOKEN@github.com/\".insteadOf \"https://github.com/\" && git lfs pull && pnpm run build",
   "outputDirectory": "dist",
   "installCommand": "pnpm install",
   "framework": null
