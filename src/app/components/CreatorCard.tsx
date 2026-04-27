@@ -5,6 +5,8 @@ interface CreatorCardProps {
   creator: Creator;
 }
 
+const GITHUB_VIDEO_BASE = 'https://media.githubusercontent.com/media/vanshsurti213-arch/firstframe-rooster/main/public/videos';
+
 export function CreatorCard({ creator }: CreatorCardProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -56,10 +58,12 @@ export function CreatorCard({ creator }: CreatorCardProps) {
               muted
             >
               <source
-                src={`/videos/${creator.videoFile}`}
-                type={creator.videoFile.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4'}
-              />
-              <source src={`/videos/${creator.videoFile}`} type="video/mp4" />
+              src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`}
+              type={creator.videoFile.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4'}
+            />
+            <source src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`} type="video/mp4" />
+            {/* local dev fallback */}
+            <source src={`/videos/${creator.videoFile}`} type="video/mp4" />
             </video>
 
             {/* Play overlay — visible when paused, hidden when playing */}
