@@ -1,5 +1,5 @@
 {
-  "buildCommand": "pnpm run build",
+  "buildCommand": "git lfs pull && pnpm run build",
   "outputDirectory": "dist",
   "installCommand": "pnpm install",
   "framework": null
