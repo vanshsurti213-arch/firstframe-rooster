@@ -82,16 +82,6 @@ export const creators: Creator[] = [
   },
   {
     id: 8,
-    name: 'Mansi Shroff',
-    handle: '@mansishroff_',
-    followers: '29.1K',
-    avgViews: '11K',
-    niches: ['Beauty', 'Fashion', 'Lifestyle', 'UGC Ads'],
-    brandCollabs: 22,
-    videoFile: 'mansi.mp4'
-  },
-  {
-    id: 9,
     name: 'Ayushi Singh',
     handle: '@ayushisingh.png',
     followers: '2.97K',
@@ -101,7 +91,7 @@ export const creators: Creator[] = [
     videoFile: 'Aayushi Singh.mp4'
   },
   {
-    id: 10,
+    id: 9,
     name: "Vimi D'silva",
     handle: '@with_weandme',
     followers: '167',
@@ -111,7 +101,7 @@ export const creators: Creator[] = [
     videoFile: 'vimi.mp4'
   },
   {
-    id: 11,
+    id: 10,
     name: 'Arpita Mahajan',
     handle: '@arpitaaa.mahajan',
     followers: '850',
