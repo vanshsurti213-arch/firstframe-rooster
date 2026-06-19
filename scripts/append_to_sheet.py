@@ -12,7 +12,7 @@ except ImportError:
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 CREDENTIALS_FILE = "credentials.json"
-DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1C34wWKYz85o0bVBhkJtWgQJdtzqr5nhZIR8dd5nHBIA"
+DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1u7TMvfn4do5dh79moo1vwgnjo3pl0nhtb6fkhki6e80"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -23,6 +23,7 @@ def get_sheet_id_from_url(url):
     parts = url.split("/")
     for i, part in enumerate(parts):
         if part == "d" and i + 1 < len(parts):
+            # Sheet IDs are case-sensitive, but let's keep the exact ID
             return parts[i + 1]
     return None
 
@@ -63,7 +64,8 @@ def main():
         print(f"❌ Authentication failed: {e}")
         sys.exit(1)
 
-    sheet_id = get_sheet_id_from_url(sheet_url)
+    # Force exact sheet ID from the user's screenshot if default URL is used
+    sheet_id = "1u7TMvFN4Do5dH79MoO1vWGNJo3PL0nHTB6fKhki6e80" if sheet_url == DEFAULT_SHEET_URL else get_sheet_id_from_url(sheet_url)
     if not sheet_id:
         print("❌ Could not extract Sheet ID from URL.")
         sys.exit(1)

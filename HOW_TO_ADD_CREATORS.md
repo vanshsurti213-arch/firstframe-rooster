@@ -1,66 +1,45 @@
-# How to Add New Creators & MP4 Videos
+# How to Add New Creators & UGC Reels
 
-## Adding a New Creator Profile
-
-Open `src/app/data/creators.ts` and copy-paste one of the existing creator objects:
-
-```typescript
-{
-  id: 11, // Make this unique!
-  name: 'Your Creator Name',
-  handle: '@theircreatorhandle',
-  niche: 'Beauty', // Choose: Beauty, Fashion, Lifestyle, Fitness, Mom/Family, or Food
-  followers: '500K',
-  avgViews: '100K',
-  engRate: '5.2%',
-  brandCollabs: 10,
-  photo: 'https://your-image-url.com/photo.jpg',
-  videoFile: 'creator-name-reel.mp4' // Just the filename
-}
-```
+You can add new creators and their UGC portfolio videos to the roster in two ways:
 
 ---
 
-## Adding MP4 Videos
+## Method 1: Using the Admin Panel UI (Recommended)
 
-### Step 1: Add Your Video File
-Place your MP4 video file in the `/public/videos/` folder.
+1. Ensure the local dev server is running by opening a terminal and starting Vite:
+   ```bash
+   npm run dev
+   ```
+2. Open your browser and navigate to the admin console:
+   [http://localhost:3000/kalva](http://localhost:3000/kalva)
+3. Click the **"+ Add Creator"** button in the top header.
+4. Fill in the creator's details:
+   - **Full Name**: e.g., Siya Uppal
+   - **Instagram Handle**: e.g., @siyauppall
+   - **Followers & Avg Views**: e.g., 735, 12K, 150K
+   - **Niches**: e.g., Fashion, Beauty, Lifestyle (comma-separated)
+   - **UGC Video File**: Choose the `.mp4` or `.mov` file from your computer.
+5. Click **"Save Creator Profile"**.
+6. The video file is automatically uploaded to `public/videos/` and the details are added to `src/app/data/creators.json` instantly.
 
-**Example:** `/public/videos/sophia-reel.mp4`
-
-### Step 2: Reference the Filename
-In `src/app/data/creators.ts`, add just the filename to the `videoFile` field:
-
-```typescript
-videoFile: 'sophia-reel.mp4'
-```
-
-### No Video (Placeholder)
-Leave it empty:
-```typescript
-videoFile: ''
-```
-
----
-
-## File Structure
-
-```
-/public
-  /videos
-    sophia-reel.mp4
-    emma-reel.mp4
-    maya-reel.mp4
-    ...
-```
+*Note: Once finished, run `git add . && git commit -m "feat: add new creators" && git push` to deploy the updates to Vercel.*
 
 ---
 
-## Quick Tips
+## Method 2: Editing the JSON File Manually (Fallback)
 
-- **ID must be unique** for each creator
-- **Niche** determines the color of the pill badge
-- **Photo** can be any direct image URL
-- **MP4 files** must be in `/public/videos/` folder
-- Videos will play with standard browser controls
-- Colors are pre-set per niche (pink for Beauty, purple for Fashion, etc.)
+1. Place your video file inside the `/public/videos/` folder.
+2. Open [creators.json](file:///Users/atharvtotawar/Desktop/firstframe-rooster/src/app/data/creators.json) and add a new entry to the array:
+   ```json
+   {
+     "id": 12,
+     "name": "Creator Name",
+     "handle": "@handle",
+     "followers": "15K",
+     "avgViews": "80K",
+     "niches": ["Fashion", "Beauty"],
+     "brandCollabs": 0,
+     "videoFile": "your-video-filename.mp4"
+   }
+   ```
+3. Save the file.

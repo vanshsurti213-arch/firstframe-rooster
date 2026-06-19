@@ -70,7 +70,16 @@ function apiPlugin() {
               pyProcess.stdout.on('data', data => { stdoutData += data; });
               pyProcess.stderr.on('data', data => { stderrData += data; });
               
+              pyProcess.on('error', err => {
+                console.error('Failed to spawn Python script:', err);
+                if (!res.writableEnded) {
+                  res.writeHead(500, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ error: `Spawn error: ${err.message}` }));
+                }
+              });
+              
               pyProcess.on('close', code => {
+                if (res.writableEnded) return;
                 if (code === 0) {
                   res.writeHead(200, { 'Content-Type': 'application/json' });
                   res.end(JSON.stringify({ success: true, message: stdoutData.trim() }));

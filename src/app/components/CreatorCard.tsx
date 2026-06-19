@@ -62,6 +62,24 @@ export function CreatorCard({
   // Get first name for public view
   const firstName = creator.name ? creator.name.split(' ')[0] : 'Creator';
 
+  const isInstagram = creator.videoFile?.includes('instagram.com/reel/') || creator.videoFile?.includes('instagram.com/p/');
+
+  const getInstagramId = (url: string) => {
+    try {
+      const parts = url.split('/');
+      const index = parts.findIndex(p => p === 'reel' || p === 'p');
+      if (index !== -1 && index + 1 < parts.length) {
+        return parts[index + 1].split('?')[0];
+      }
+      return '';
+    } catch (e) {
+      return '';
+    }
+  };
+
+  const instagramId = isInstagram ? getInstagramId(creator.videoFile) : '';
+  const instagramCoverUrl = instagramId ? `https://www.instagram.com/p/${instagramId}/media/?size=l` : '';
+
   return (
     <div className={`creator-card ${isAddedToCampaign ? 'creator-card--selected' : ''}`}>
       <motion.div
@@ -80,26 +98,39 @@ export function CreatorCard({
               </div>
             )}
 
-            <video
-              ref={videoRef}
-              preload="metadata"
-              loop
-              playsInline
-              muted
-              style={{ opacity: videoLoaded ? 1 : 0, transition: 'opacity 0.3s ease' }}
-              onLoadedData={() => setVideoLoaded(true)}
-            >
-              <source
-                src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`}
-                type={creator.videoFile.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4'}
+            {isInstagram ? (
+              <img
+                src={instagramCoverUrl}
+                alt={`${creator.name} Cover`}
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                onLoad={() => setVideoLoaded(true)}
               />
-              <source src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`} type="video/mp4" />
-              <source src={`/videos/${creator.videoFile}`} type="video/mp4" />
-            </video>
+            ) : (
+              <video
+                ref={videoRef}
+                preload="metadata"
+                loop
+                playsInline
+                muted
+                style={{ opacity: videoLoaded ? 1 : 0, transition: 'opacity 0.3s ease' }}
+                onLoadedData={() => setVideoLoaded(true)}
+              >
+                <source
+                  src={creator.videoFile.startsWith('http') ? creator.videoFile : `${GITHUB_VIDEO_BASE}/${creator.videoFile}`}
+                  type={creator.videoFile.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4'}
+                />
+                {!creator.videoFile.startsWith('http') && (
+                  <>
+                    <source src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`} type="video/mp4" />
+                    <source src={`/videos/${creator.videoFile}`} type="video/mp4" />
+                  </>
+                )}
+              </video>
+            )}
 
             {/* Play overlay */}
-            {videoLoaded && (
-              <div className={`creator-card__play-overlay${playing ? ' hidden' : ''}`}>
+            {(isInstagram || (videoLoaded && !playing)) && (
+              <div className="creator-card__play-overlay">
                 <div className="creator-card__play-btn">
                   <svg width="14" height="16" viewBox="0 0 14 16" fill="none">
                     <path d="M1 1L13 8L1 15V1Z" fill="#111111"/>
@@ -109,7 +140,7 @@ export function CreatorCard({
             )}
 
             {/* Mute toggle — only visible when playing */}
-            {playing && (
+            {!isInstagram && playing && (
               <button className="creator-card__mute-btn" onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'}>
                 {muted ? (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

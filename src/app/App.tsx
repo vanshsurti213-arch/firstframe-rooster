@@ -23,6 +23,7 @@ export default function App() {
   const [newAvgViews, setNewAvgViews] = useState('');
   const [newNiches, setNewNiches] = useState('');
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState('');
   const [uploadingVideo, setUploadingVideo] = useState(false);
 
   // Simple Router Detection based on window.location.pathname
@@ -122,19 +123,19 @@ export default function App() {
       let errorMsg = '';
 
       if (webAppUrl) {
-        // Direct client-side submission (ideal for production / Vercel static build)
-        const res = await fetch(webAppUrl, {
+        // Direct client-side submission with no-cors to prevent CORS/redirect errors.
+        // Google Apps Script doPost runs successfully, but redirects the response.
+        await fetch(webAppUrl, {
           method: 'POST',
+          mode: 'no-cors',
           headers: {
-            'Content-Type': 'text/plain', // Bypasses CORS preflight check on Google Apps Script
+            'Content-Type': 'text/plain',
           },
           body: JSON.stringify(campaignList),
         });
-        const data = await res.json();
-        success = data.success;
-        errorMsg = data.error;
+        success = true;
       } else {
-        // Fallback to local dev server endpoint
+        // Fallback to local dev server endpoint if no URL is provided
         const res = await fetch('/api/add-to-campaign', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -172,8 +173,9 @@ export default function App() {
     setUploadingVideo(true);
     let uploadedFilename = '';
 
-    // If there is a video file, upload it
-    if (videoFile) {
+    if (videoUrl) {
+      uploadedFilename = videoUrl;
+    } else if (videoFile) {
       try {
         const res = await fetch('/api/upload-video', {
           method: 'POST',
@@ -224,6 +226,7 @@ export default function App() {
     setNewAvgViews('');
     setNewNiches('');
     setVideoFile(null);
+    setVideoUrl('');
     setShowAddModal(false);
     setUploadingVideo(false);
     triggerStatus('success', `Creator ${newName} added successfully!`);
@@ -398,20 +401,35 @@ export default function App() {
               {/* Simulated screen viewport */}
               <div className="phone-screen">
                 {activeVideoCreator.videoFile ? (
-                  <video
-                    key={activeVideoCreator.id}
-                    src={`${GITHUB_VIDEO_BASE}/${activeVideoCreator.videoFile}`}
-                    autoPlay
-                    loop
-                    playsInline
-                    muted={lightboxMuted}
-                    className="phone-video"
-                    ref={(el) => {
-                      if (el) {
-                        el.play().catch(() => {});
-                      }
-                    }}
-                  />
+                  activeVideoCreator.videoFile.includes('instagram.com') ? (
+                    <iframe
+                      src={activeVideoCreator.videoFile.split('?')[0].endsWith('/') 
+                        ? `${activeVideoCreator.videoFile.split('?')[0]}embed/` 
+                        : `${activeVideoCreator.videoFile.split('?')[0]}/embed/`}
+                      title={`${activeVideoCreator.name} Instagram Reel`}
+                      frameBorder="0"
+                      scrolling="no"
+                      allowTransparency
+                      allow="encrypted-media"
+                      style={{ width: '100%', height: '100%', border: 'none', background: '#000000' }}
+                      className="phone-video"
+                    />
+                  ) : (
+                    <video
+                      key={activeVideoCreator.id}
+                      src={activeVideoCreator.videoFile.startsWith('http') ? activeVideoCreator.videoFile : `${GITHUB_VIDEO_BASE}/${activeVideoCreator.videoFile}`}
+                      autoPlay
+                      loop
+                      playsInline
+                      muted={lightboxMuted}
+                      className="phone-video"
+                      ref={(el) => {
+                        if (el) {
+                          el.play().catch(() => {});
+                        }
+                      }}
+                    />
+                  )
                 ) : (
                   <div className="phone-placeholder">
                     <span>Video file not found</span>
@@ -446,16 +464,18 @@ export default function App() {
                   </div>
 
                   {/* Reels Action Bar (Volume unmute controls on bottom right) */}
-                  <div className="reels-overlay__right">
-                    <button 
-                      type="button"
-                      className="reels-action-btn"
-                      onClick={() => setLightboxMuted(!lightboxMuted)}
-                      title={lightboxMuted ? "Unmute" : "Mute"}
-                    >
-                      {lightboxMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                    </button>
-                  </div>
+                  {!activeVideoCreator.videoFile.includes('instagram.com') && (
+                    <div className="reels-overlay__right">
+                      <button 
+                        type="button"
+                        className="reels-action-btn"
+                        onClick={() => setLightboxMuted(!lightboxMuted)}
+                        title={lightboxMuted ? "Unmute" : "Mute"}
+                      >
+                        {lightboxMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               </div>
             </motion.div>
@@ -533,12 +553,15 @@ export default function App() {
                 />
               </div>
               <div className="form-group">
-                <label>UGC Video File (MP4/MOV)</label>
+                <label>UGC Video File (Local Upload)</label>
                 <div className="file-input-wrapper">
                   <input 
                     type="file" 
                     accept="video/mp4,video/quicktime" 
-                    onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+                    onChange={(e) => {
+                      setVideoFile(e.target.files?.[0] || null);
+                      if (e.target.files?.[0]) setVideoUrl('');
+                    }}
                     id="creator-video"
                     disabled={uploadingVideo}
                   />
@@ -546,6 +569,30 @@ export default function App() {
                     {videoFile ? videoFile.name : 'Choose Video File...'}
                   </label>
                 </div>
+              </div>
+              <div className="form-group" style={{ marginTop: '12px' }}>
+                <label>OR Direct Video URL (MP4/MOV Link)</label>
+                <input 
+                  type="url" 
+                  value={videoUrl} 
+                  onChange={(e) => {
+                    setVideoUrl(e.target.value);
+                    if (e.target.value) setVideoFile(null);
+                  }}
+                  placeholder="https://example.com/video.mp4" 
+                  disabled={uploadingVideo}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                    color: '#ffffff',
+                    outline: 'none',
+                    fontSize: '14px',
+                    transition: 'border-color 0.2s ease',
+                  }}
+                />
               </div>
               
               <button 
