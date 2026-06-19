@@ -1,0 +1,6 @@
+node_modules
+credentials.json
+.env
+dist
+.DS_Store
+public/videos/
