@@ -1,34 +1,41 @@
 import { useState, useEffect } from 'react';
-import { creators as initialCreators, Creator } from './data/creators';
+import { supabase } from './lib/supabase';
+import { creators as initialCreators, Creator, Reel } from './data/creators';
 import { CreatorCard } from './components/CreatorCard';
-import { Settings, Plus, Check, AlertCircle, RefreshCw, X, CheckSquare, Shield, Volume2, VolumeX } from 'lucide-react';
+import { Plus, Check, AlertCircle, X, CheckSquare, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-const GITHUB_VIDEO_BASE = 'https://media.githubusercontent.com/media/Atharv-25/firstframe-rooster/main/public/videos';
+const NICHE_OPTIONS = [
+  'Skincare', 'Makeup', 'Hair', 'Body', 'Nails', 'Wellness', 'Fitness',
+  'Fashion', 'Lifestyle', 'Food', 'Baby', 'Travel', 'Tech', 'Gaming', 'Finance',
+];
 
 export default function App() {
-  const [creatorsList, setCreatorsList] = useState<Creator[]>(initialCreators);
+  const [creatorsList, setCreatorsList] = useState<Creator[]>([]);
   const [campaignList, setCampaignList] = useState<Creator[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  
-  // Lightbox player state
-  const [activeVideoCreator, setActiveVideoCreator] = useState<Creator | null>(null);
-  const [lightboxMuted, setLightboxMuted] = useState(false);
-  const [lightboxSrc, setLightboxSrc] = useState('');
 
   // New Creator Form State
   const [newName, setNewName] = useState('');
-  const [newHandle, setNewHandle] = useState('');
+  const [newProfileUrl, setNewProfileUrl] = useState('');
+  const [isFetchingDetails, setIsFetchingDetails] = useState(false);
   const [newFollowers, setNewFollowers] = useState('');
-  const [newAvgViews, setNewAvgViews] = useState('');
-  const [newNiches, setNewNiches] = useState('');
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState('');
-  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [newNiches, setNewNiches] = useState<string[]>([]);
+  const [newReels, setNewReels] = useState<Reel[]>([{
+    id: `reel_${Date.now()}_0`,
+    label: 'Demo Reel',
+    videoUrl: '',
+  }]);
+  const [modalError, setModalError] = useState<string | null>('');
+  const [isFetchingProfile, setIsFetchingProfile] = useState(false);
+  const [isSavingCreator, setIsSavingCreator] = useState(false);
+  const [editingCreator, setEditingCreator] = useState<Creator | null>(null);
 
   // Simple Router Detection based on window.location.pathname
   const [isAdminView, setIsAdminView] = useState(() => window.location.pathname === '/kalva');
+
+  const [submittingCampaign, setSubmittingCampaign] = useState(false);
 
   // Listen to popstate event to handle forward/backward path changes
   useEffect(() => {
@@ -39,19 +46,10 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  // Update lightboxSrc when activeVideoCreator changes
+  // Initialize creators from local JSON
   useEffect(() => {
-    if (activeVideoCreator) {
-      const initialSrc = activeVideoCreator.videoFile.startsWith('http')
-        ? activeVideoCreator.videoFile
-        : (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-            ? `/videos/${activeVideoCreator.videoFile}`
-            : `${GITHUB_VIDEO_BASE}/${activeVideoCreator.videoFile}`);
-      setLightboxSrc(initialSrc);
-    } else {
-      setLightboxSrc('');
-    }
-  }, [activeVideoCreator]);
+    setCreatorsList(initialCreators);
+  }, []);
 
   // Load campaign list from localStorage
   useEffect(() => {
@@ -71,25 +69,47 @@ export default function App() {
     setTimeout(() => setStatusMessage(null), 5000);
   };
 
-  const handleUpdateName = (id: number, newName: string) => {
+  const handleUpdateName = (id: string, newName: string) => {
     const updated = creatorsList.map((c) => (c.id === id ? { ...c, name: newName } : c));
     setCreatorsList(updated);
     saveCreatorsToBackend(updated);
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this creator from the roster?')) {
+      const creatorToDelete = creatorsList.find(c => c.id === id);
       const updated = creatorsList.filter((c) => c.id !== id);
       setCreatorsList(updated);
-      
+
       // Also remove from campaign list if present
       if (campaignList.some(c => c.id === id)) {
         const updatedCampaign = campaignList.filter(c => c.id !== id);
         setCampaignList(updatedCampaign);
         localStorage.setItem('campaignList', JSON.stringify(updatedCampaign));
       }
-      
+
       saveCreatorsToBackend(updated);
+
+      if (creatorToDelete) {
+        try {
+          const { error: dbError } = await supabase.from('creators').delete().eq('name', creatorToDelete.name);
+          if (dbError) console.error("Error deleting from Supabase DB:", dbError);
+          
+          if (creatorToDelete.reels && creatorToDelete.reels.length > 0) {
+            const videoUrl = creatorToDelete.reels[0].videoUrl;
+            if (videoUrl && videoUrl.includes('/storage/v1/object/public/videos/')) {
+               const filename = videoUrl.split('/').pop();
+               if (filename) {
+                  const { error: storageError } = await supabase.storage.from('videos').remove([filename]);
+                  if (storageError) console.error("Error deleting from Supabase Storage:", storageError);
+               }
+            }
+          }
+        } catch(e) {
+          console.error("Supabase delete failed:", e);
+        }
+      }
+
       triggerStatus('success', 'Creator successfully deleted.');
     }
   };
@@ -129,7 +149,7 @@ export default function App() {
     if (campaignList.length === 0) return;
     setSubmittingCampaign(true);
     triggerStatus('success', 'Submitting shortlist to Google Sheets...');
-    
+
     // Check if direct Google Sheets Web App URL is configured in environment variables
     const webAppUrl = import.meta.env.VITE_SHEETS_WEBAPP_URL || "https://script.google.com/macros/s/AKfycbw13qQVMpT3k0IY_LLDUcl4_PyK0tVopVbkbFGZcpwBEqMH_H5AdxCrkPJnYimWCBri-Q/exec";
 
@@ -139,7 +159,6 @@ export default function App() {
 
       if (webAppUrl) {
         // Direct client-side submission with no-cors to prevent CORS/redirect errors.
-        // Google Apps Script doPost runs successfully, but redirects the response.
         await fetch(webAppUrl, {
           method: 'POST',
           mode: 'no-cors',
@@ -176,91 +195,190 @@ export default function App() {
     }
   };
 
-  const [submittingCampaign, setSubmittingCampaign] = useState(false);
+  const resetAddModal = () => {
+    setNewName('');
+    setNewProfileUrl('');
+    setNewFollowers('');
+    setNewNiches([]);
+    setNewReels([{ videoUrl: '', label: '' }]);
+    setModalError(null);
+  };
+
+  const handleFetchDetails = async () => {
+    if (!newProfileUrl) {
+      setModalError('Please enter an Instagram Profile URL first.');
+      return;
+    }
+    
+    setIsFetchingDetails(true);
+    setModalError(null);
+
+    try {
+      const res = await fetch('/api/fetch-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileUrl: newProfileUrl.trim() })
+      });
+      const data = await res.json();
+      
+      if (res.ok && data.success) {
+        if (data.name) setNewName(data.name);
+        if (data.followers) setNewFollowers(data.followers);
+      } else {
+        setModalError(`Failed to fetch details: ${data.error || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      setModalError(`Network error: ${e.message}`);
+    } finally {
+      setIsFetchingDetails(false);
+    }
+  };
+
+  const handleEditCreator = (creator: Creator) => {
+    setEditingCreator(creator);
+    setNewName(creator.name);
+    setNewProfileUrl(creator.profileUrl || '');
+    setNewFollowers(creator.followers || '');
+    setNewNiches(creator.niches || []);
+    
+    if (creator.reels && creator.reels.length > 0) {
+      setNewReels([creator.reels[0]]);
+    } else {
+      setNewReels([{
+        id: `reel_${Date.now()}_0`,
+        label: 'Demo Reel',
+        videoUrl: '',
+      }]);
+    }
+    setShowAddModal(true);
+  };
+
+
 
   const handleAddCreator = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName || !newHandle) {
-      triggerStatus('error', 'Name and Instagram Handle are required.');
+    setModalError('');
+
+    if (!newProfileUrl.trim()) {
+      setModalError('Instagram Profile URL is required.');
       return;
     }
 
-    setUploadingVideo(true);
-    let uploadedFilename = '';
-
-    if (videoUrl) {
-      try {
-        const res = await fetch('/api/download-reel', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: videoUrl }),
-        });
-        const data = await res.json();
-        if (data.success) {
-          uploadedFilename = data.filename;
-        } else {
-          throw new Error(data.error);
-        }
-      } catch (err: any) {
-        triggerStatus('error', `Reel download failed: ${err.message}`);
-        setUploadingVideo(false);
-        return;
-      }
-    } else if (videoFile) {
-      try {
-        const res = await fetch('/api/upload-video', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-Filename': videoFile.name,
-          },
-          body: videoFile,
-        });
-        const data = await res.json();
-        if (data.success) {
-          uploadedFilename = data.filename;
-        } else {
-          throw new Error(data.error);
-        }
-      } catch (err: any) {
-        triggerStatus('error', `Video upload failed: ${err.message}`);
-        setUploadingVideo(false);
-        return;
-      }
+    // Validation
+    if (!newName.trim()) {
+      setModalError('Creator name is required.');
+      return;
+    }
+    if (newNiches.length === 0) {
+      setModalError('Select at least one niche.');
+      return;
+    }
+    
+    // Duplicate check
+    const isDuplicate = creatorsList.some(c => 
+      c.profileUrl && c.profileUrl.toLowerCase() === newProfileUrl.trim().toLowerCase()
+    );
+    if (isDuplicate && !editingCreator) {
+      setModalError('Warning: This creator is already on the page!');
+      return;
+    }
+    
+    // Extract handle from URL
+    let cleanHandle = '';
+    try {
+      const urlObj = new URL(newProfileUrl);
+      const parts = urlObj.pathname.split('/').filter(Boolean);
+      if (parts.length > 0) cleanHandle = parts[0];
+    } catch {
+      // Ignore
     }
 
-    const newId = Math.max(...creatorsList.map((c) => c.id), 0) + 1;
-    const cleanNiches = newNiches
-      .split(',')
-      .map((n) => n.trim())
-      .filter((n) => n.length > 0);
+    setIsSavingCreator(true);
 
-    const newCreator: Creator = {
-      id: newId,
-      name: newName,
-      handle: newHandle.startsWith('@') ? newHandle : `@${newHandle}`,
-      followers: newFollowers || 'N/A',
-      avgViews: newAvgViews || 'N/A',
-      niches: cleanNiches,
-      brandCollabs: 0,
-      videoFile: uploadedFilename || undefined,
-    };
+    try {
+      let finalName = newName.trim();
+      let finalFollowers = newFollowers.trim() || '—';
+           const updatedCreator: Creator = {
+          id: editingCreator ? editingCreator.id : `creator_${Date.now()}`,
+          name: finalName || 'Unknown Creator',
+          handle: cleanHandle || undefined,
+          profileUrl: newProfileUrl.trim(),
+          followers: finalFollowers,
+          avgViews: "—", // Avg Views removed from UI
+          niches: newNiches,
+          reels: newReels, // Preserve existing or updated reels
+        };
+  
+        let updatedList: Creator[];
+        if (editingCreator) {
+          updatedList = creatorsList.map(c => c.id === editingCreator.id ? updatedCreator : c);
+        } else {
+          updatedList = [updatedCreator, ...creatorsList];
+        }
+  
+        setCreatorsList(updatedList);
+        
+        // 1. Save Niches, Name, and AvgViews to disk FIRST
+        await saveCreatorsToBackend(updatedList);
+  
+        const reelUrl = newReels[0]?.videoUrl?.trim() || '';
+  
+        // 2. Trigger Apify to scrape reels ONLY IF it's a new external URL
+        if (reelUrl.startsWith('http')) {
+          try {
+            const res = await fetch('/api/process-creator', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ profileUrl: newProfileUrl.trim(), reelUrl })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+              console.error('Apify scraping failed:', data.error);
+            }
+          } catch (e) {
+            console.error('Process error:', e);
+          }
+        }
+      
+      // 3. Reload the page to pull the newly generated reels from creators.json
+      window.location.reload();
 
-    const updatedList = [newCreator, ...creatorsList];
-    setCreatorsList(updatedList);
-    await saveCreatorsToBackend(updatedList);
+      resetAddModal();
+      setShowAddModal(false);
+      triggerStatus('success', `Creator ${newName.trim()} added successfully!`);
+    } catch (e: any) {
+      setModalError(`Failed to save creator: ${e.message}`);
+    } finally {
+      setIsSavingCreator(false);
+    }
+  };
 
-    // Reset Form
-    setNewName('');
-    setNewHandle('');
-    setNewFollowers('');
-    setNewAvgViews('');
-    setNewNiches('');
-    setVideoFile(null);
-    setVideoUrl('');
-    setShowAddModal(false);
-    setUploadingVideo(false);
-    triggerStatus('success', `Creator ${newName} added successfully!`);
+  const toggleNiche = (niche: string) => {
+    setNewNiches(prev =>
+      prev.includes(niche)
+        ? prev.filter(n => n !== niche)
+        : [...prev, niche]
+    );
+  };
+
+  const updateReel = (index: number, field: keyof Reel, value: string) => {
+    setNewReels(prev => prev.map((r, i) =>
+      i === index ? { ...r, [field]: value } : r
+    ));
+  };
+
+  const addReelEntry = () => {
+    if (newReels.length >= 6) return;
+    setNewReels(prev => [...prev, {
+      id: `reel_${Date.now()}_${prev.length}`,
+      label: `Demo Reel ${prev.length + 1}`,
+      videoUrl: '',
+    }]);
+  };
+
+  const removeReelEntry = (index: number) => {
+    if (newReels.length <= 1) return;
+    setNewReels(prev => prev.filter((_, i) => i !== index));
   };
 
   const clearCampaign = () => {
@@ -290,7 +408,7 @@ export default function App() {
               {isAdminView ? 'Creators (Admin)' : 'Creators'}
             </span>
           </div>
-          
+
           {/* Action buttons (Only shown in Admin Route) */}
           {isAdminView && (
             <div className="header-actions">
@@ -298,9 +416,12 @@ export default function App() {
                 <Shield size={14} />
                 <span>Admin Mode</span>
               </div>
-              <button 
+              <button
                 className="action-btn action-btn--primary"
-                onClick={() => setShowAddModal(true)}
+                onClick={() => {
+                  resetAddModal();
+                  setShowAddModal(true);
+                }}
               >
                 <Plus size={15} />
                 <span>Add Creator</span>
@@ -323,28 +444,26 @@ export default function App() {
             </span>
           </div>
           <p className="section-description">
-            {isAdminView 
+            {isAdminView
               ? 'Admin Controls: Update creator names inline (saved instantly) or delete creators. Click "Add Creator" above to upload new portfolios.'
-              : 'Starting Point: These are UGC demo reels from our premium 2026 creator roster. Click any video to view it in full mobile display, shortlist candidates, and submit campaign.'}
+              : 'Starting Point: These are UGC demo reels from our premium 2026 creator roster. Click any card to view their full portfolio, shortlist candidates, and submit campaign.'}
           </p>
         </div>
 
-        {/* Creator Grid */}
-        <div className="video-row">
+        {/* Creator Masonry Grid */}
+        <div className="masonry-grid">
           {creatorsList.map((creator) => (
-            <CreatorCard
-              key={creator.id}
-              creator={creator}
-              isAdminView={isAdminView}
-              onUpdateName={handleUpdateName}
-              onDelete={handleDelete}
-              isAddedToCampaign={campaignList.some((c) => c.id === creator.id)}
-              onToggleCampaign={handleToggleCampaign}
-              onClickVideo={(c) => {
-                setActiveVideoCreator(c);
-                setLightboxMuted(false);
-              }}
-            />
+            <div key={creator.id} className="masonry-item">
+              <CreatorCard
+                creator={creator}
+                inCampaign={campaignList.some((c) => c.id === creator.id)}
+                onToggleCampaign={handleToggleCampaign}
+                isAdminView={isAdminView}
+                onUpdateName={handleUpdateName}
+                onDelete={handleDelete}
+                onEdit={handleEditCreator}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -376,18 +495,18 @@ export default function App() {
                   </motion.span>
                 </div>
                 <div className="campaign-pill__divider"></div>
-                <button 
-                  type="button" 
-                  className="campaign-pill__submit-btn" 
+                <button
+                  type="button"
+                  className="campaign-pill__submit-btn"
                   onClick={handleSubmitCampaign}
                   disabled={submittingCampaign}
                 >
                   {submittingCampaign ? 'Submitting...' : 'Submit Shortlist'}
                 </button>
                 <div className="campaign-pill__divider"></div>
-                <button 
-                  type="button" 
-                  className="campaign-pill__clear-btn" 
+                <button
+                  type="button"
+                  className="campaign-pill__clear-btn"
                   onClick={clearCampaign}
                   disabled={submittingCampaign}
                 >
@@ -399,254 +518,119 @@ export default function App() {
         </AnimatePresence>
       )}
 
-      {/* Mobile Video Lightbox Overlay */}
-      <AnimatePresence>
-        {activeVideoCreator && (
-          <motion.div
-            className="lightbox-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setActiveVideoCreator(null)}
-          >
-            {/* Close button outside mobile mockup chassis */}
-            <motion.button 
-              className="lightbox-close-btn" 
-              onClick={() => setActiveVideoCreator(null)}
-              title="Close Player"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              transition={{ duration: 0.2 }}
-            >
-              <X size={26} />
-            </motion.button>
-
-            {/* Premium Smartphone device mockup with plain thin border */}
-            <motion.div
-              layoutId={`creator-video-wrap-${activeVideoCreator.id}`}
-              className="phone-chassis"
-              onClick={(e) => e.stopPropagation()}
-              transition={{ type: 'spring', stiffness: 300, damping: 28 }}
-            >
-              {/* Simulated screen viewport */}
-              <div className="phone-screen">
-                {activeVideoCreator.videoFile ? (
-                  activeVideoCreator.videoFile.includes('instagram.com') ? (
-                    <iframe
-                      src={activeVideoCreator.videoFile.split('?')[0].endsWith('/') 
-                        ? `${activeVideoCreator.videoFile.split('?')[0]}embed/` 
-                        : `${activeVideoCreator.videoFile.split('?')[0]}/embed/`}
-                      title={`${activeVideoCreator.name} Instagram Reel`}
-                      frameBorder="0"
-                      scrolling="no"
-                      allowTransparency
-                      allow="encrypted-media"
-                      style={{ width: '100%', height: '100%', border: 'none', background: '#000000' }}
-                      className="phone-video"
-                    />
-                  ) : (
-                    <video
-                      key={activeVideoCreator.id}
-                      src={lightboxSrc}
-                      autoPlay
-                      loop
-                      playsInline
-                      muted={lightboxMuted}
-                      className="phone-video"
-                      ref={(el) => {
-                        if (el) {
-                          el.play().catch(() => {});
-                        }
-                      }}
-                      onError={() => {
-                        // Fall back to GitHub LFS CDN if local file fails (e.g. if it is a 132-byte git LFS pointer)
-                        if (lightboxSrc && !lightboxSrc.startsWith('http') && !lightboxSrc.startsWith('https://media.githubusercontent')) {
-                          console.log('Local video failed, falling back to GitHub LFS CDN');
-                          setLightboxSrc(`${GITHUB_VIDEO_BASE}/${activeVideoCreator.videoFile}`);
-                        }
-                      }}
-                    />
-                  )
-                ) : (
-                  <div className="phone-placeholder">
-                    <span>Video file not found</span>
-                  </div>
-                )}
-
-                {/* Reels Overlay: details of creator at bottom-left */}
-                <motion.div 
-                  className="reels-overlay"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ delay: 0.2, duration: 0.25 }}
-                >
-                  <div className="reels-overlay__bottom">
-                    <span className="reels-creator-name">
-                      {isAdminView ? activeVideoCreator.name : activeVideoCreator.name.split(' ')[0]}
-                    </span>
-                    {!isAdminView && (
-                      <span className="reels-tagline">Premium UGC Creator</span>
-                    )}
-                    {isAdminView && (
-                      <span className="reels-creator-handle">
-                        {activeVideoCreator.handle}
-                      </span>
-                    )}
-                    <div className="reels-creator-stats">
-                      <span>{activeVideoCreator.followers} followers</span>
-                      <span className="bullet">•</span>
-                      <span>{activeVideoCreator.avgViews} views</span>
-                    </div>
-                  </div>
-
-                  {/* Reels Action Bar (Volume unmute controls on bottom right) */}
-                  {!activeVideoCreator.videoFile.includes('instagram.com') && (
-                    <div className="reels-overlay__right">
-                      <button 
-                        type="button"
-                        className="reels-action-btn"
-                        onClick={() => setLightboxMuted(!lightboxMuted)}
-                        title={lightboxMuted ? "Unmute" : "Mute"}
-                      >
-                        {lightboxMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Add Creator Modal */}
+      {/* Add Creator Modal (Admin only) */}
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => !uploadingVideo && setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Add New Creator</h3>
-              <button 
-                className="modal-close" 
-                onClick={() => !uploadingVideo && setShowAddModal(false)}
-                disabled={uploadingVideo}
+              <h3>{editingCreator ? 'Edit Creator' : 'Add New Creator'}</h3>
+              <button
+                className="modal-close"
+                onClick={() => setShowAddModal(false)}
               >
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={handleAddCreator} className="modal-form">
-              <div className="form-group">
-                <label>Full Name *</label>
-                <input 
-                  type="text" 
-                  value={newName} 
-                  onChange={(e) => setNewName(e.target.value)} 
-                  placeholder="e.g. Siya Uppal" 
-                  required 
-                  disabled={uploadingVideo}
-                />
-              </div>
-              <div className="form-group">
-                <label>Instagram Handle *</label>
-                <input 
-                  type="text" 
-                  value={newHandle} 
-                  onChange={(e) => setNewHandle(e.target.value)} 
-                  placeholder="e.g. @siyauppall" 
-                  required 
-                  disabled={uploadingVideo}
-                />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Followers Count</label>
-                  <input 
-                    type="text" 
-                    value={newFollowers} 
-                    onChange={(e) => setNewFollowers(e.target.value)} 
-                    placeholder="e.g. 735 or 12.6K" 
-                    disabled={uploadingVideo}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Avg Views</label>
-                  <input 
-                    type="text" 
-                    value={newAvgViews} 
-                    onChange={(e) => setNewAvgViews(e.target.value)} 
-                    placeholder="e.g. 67K or 150K" 
-                    disabled={uploadingVideo}
-                  />
-                </div>
-              </div>
-              <div className="form-group">
-                <label>Niches (Comma-separated)</label>
-                <input 
-                  type="text" 
-                  value={newNiches} 
-                  onChange={(e) => setNewNiches(e.target.value)} 
-                  placeholder="e.g. Fashion, Beauty, Lifestyle" 
-                  disabled={uploadingVideo}
-                />
-              </div>
-              <div className="form-group">
-                <label>UGC Video File (Local Upload)</label>
-                <div className="file-input-wrapper">
-                  <input 
-                    type="file" 
-                    accept="video/mp4,video/quicktime" 
-                    onChange={(e) => {
-                      setVideoFile(e.target.files?.[0] || null);
-                      if (e.target.files?.[0]) setVideoUrl('');
-                    }}
-                    id="creator-video"
-                    disabled={uploadingVideo}
-                  />
-                  <label htmlFor="creator-video" className="file-label">
-                    {videoFile ? videoFile.name : 'Choose Video File...'}
-                  </label>
-                </div>
-              </div>
-              <div className="form-group" style={{ marginTop: '12px' }}>
-                <label>OR Direct Video URL (MP4/MOV Link)</label>
-                <input 
-                  type="url" 
-                  value={videoUrl} 
-                  onChange={(e) => {
-                    setVideoUrl(e.target.value);
-                    if (e.target.value) setVideoFile(null);
-                  }}
-                  placeholder="https://example.com/video.mp4" 
-                  disabled={uploadingVideo}
-                  style={{
-                    width: '100%',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-                    color: '#ffffff',
-                    outline: 'none',
-                    fontSize: '14px',
-                    transition: 'border-color 0.2s ease',
-                  }}
-                />
-              </div>
-              
-              <button 
-                type="submit" 
-                className="submit-btn" 
-                disabled={uploadingVideo}
-              >
-                {uploadingVideo ? (
-                  <>
-                    <RefreshCw className="animate-spin" size={16} />
-                    <span>Uploading Video & Saving...</span>
-                  </>
-                ) : (
-                  <span>Save Creator Profile</span>
+            <form onSubmit={handleAddCreator}>
+              <div className="modal-body-scroll">
+                {/* Error message */}
+                {modalError && (
+                  <div className="modal-error">{modalError}</div>
                 )}
-              </button>
+
+                {/* Profile URL with Fetch Button */}
+                <div className="form-group" style={{ position: 'relative' }}>
+                  <label>Instagram Profile URL *</label>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      value={newProfileUrl}
+                      onChange={(e) => setNewProfileUrl(e.target.value)}
+                      placeholder="e.g. https://instagram.com/siyauppall"
+                      style={{ flex: 1 }}
+                    />
+                    <button 
+                      type="button" 
+                      className="modal-submit-btn" 
+                      style={{ width: 'auto', margin: 0, padding: '0 16px' }}
+                      onClick={handleFetchDetails}
+                      disabled={isFetchingDetails}
+                    >
+                      {isFetchingDetails ? 'Fetching...' : 'Fetch Details'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Name */}
+                <div className="form-group">
+                  <label>Full Name *</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="e.g. Siya Uppal"
+                  />
+                </div>
+
+                {/* Followers */}
+                <div className="form-group">
+                  <label>Followers</label>
+                  <input
+                    type="text"
+                    value={newFollowers}
+                    onChange={(e) => setNewFollowers(e.target.value)}
+                    placeholder="e.g. 12.6K"
+                  />
+                </div>
+
+                {/* Niche pills */}
+                <div className="form-group">
+                  <label>Niches *</label>
+                  <div className="niche-pills">
+                    {NICHE_OPTIONS.map((niche) => (
+                      <button
+                        key={niche}
+                        type="button"
+                        className={`niche-pill-toggle ${newNiches.includes(niche) ? 'niche-pill-toggle--active' : ''}`}
+                        onClick={() => toggleNiche(niche)}
+                      >
+                        {niche}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Reels section */}
+                <div className="form-group">
+                  <label>Demo Reel URL *</label>
+                  <div className="reel-entry">
+                    <input
+                      type="text"
+                      value={newReels[0].videoUrl}
+                      onChange={(e) => updateReel(0, 'videoUrl', e.target.value)}
+                      placeholder="https://... or local .mp4 filename"
+                    />
+                    <span className="reel-entry__helper">
+                      Supports: direct .mp4 · Instagram reels · YouTube Shorts
+                    </span>
+                    <div className="reel-entry__row" style={{ gridTemplateColumns: '1fr' }}>
+                      <input
+                        type="text"
+                        value={newReels[0].label}
+                        onChange={(e) => updateReel(0, 'label', e.target.value)}
+                        placeholder="Label (e.g. Skincare Demo)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Submit button outside scroll area */}
+              <div style={{ padding: '0 20px 20px' }}>
+                <button type="submit" className="modal-submit-btn" disabled={isSavingCreator}>
+                  {isSavingCreator ? 'Downloading & Saving...' : 'Save Creator Profile'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

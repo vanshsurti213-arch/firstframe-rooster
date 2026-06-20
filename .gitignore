@@ -1,5 +1,13 @@
 node_modules
 credentials.json
 .env
+.env.local
+.env*.local
 dist
 .DS_Store
+instagram-supabase-actor/
+creators_data.tsv
+incomplete_creators.md
+pending_creators.md
+debug_urls.cjs
+test_*

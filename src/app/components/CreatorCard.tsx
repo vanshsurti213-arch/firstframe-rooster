@@ -1,263 +1,489 @@
-import { useRef, useState } from 'react';
-import { Creator } from '../data/creators';
-import { Trash2, Plus, Check } from 'lucide-react';
-import { motion } from 'motion/react';
-
-interface CreatorCardProps {
-  creator: Creator;
-  isAdminView: boolean;
-  onUpdateName: (id: number, newName: string) => void;
-  onDelete: (id: number) => void;
-  isAddedToCampaign: boolean;
-  onToggleCampaign: (creator: Creator) => void;
-  onClickVideo: (creator: Creator) => void;
-}
+import { useState, memo } from 'react';
+import { Creator, Reel } from '../data/creators';
+import { Plus, Check, X, Play, Volume2, VolumeX } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 const GITHUB_VIDEO_BASE = 'https://media.githubusercontent.com/media/Atharv-25/firstframe-rooster/main/public/videos';
 
-export function CreatorCard({
-  creator,
-  isAdminView,
-  onUpdateName,
-  onDelete,
-  isAddedToCampaign,
-  onToggleCampaign,
-  onClickVideo,
-}: CreatorCardProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = useState(false);
-  const [muted, setMuted] = useState(true);
-  const [videoLoaded, setVideoLoaded] = useState(false);
+// ── Helper functions ──────────────────────────────────────────────
 
-  const handleMouseEnter = () => {
-    if (videoRef.current) {
-      videoRef.current.play().catch(() => {});
-      setPlaying(true);
-    }
-  };
+function isInstagramUrl(url: string) {
+  return (url.includes('instagram.com') || url.includes('instagr.am')) && !url.includes('cdninstagram.com');
+}
 
-  const handleMouseLeave = () => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-      setPlaying(false);
-      setMuted(true);
-      videoRef.current.muted = true;
-    }
-  };
+function isYouTubeUrl(url: string) {
+  return url.includes('youtube.com') || url.includes('youtu.be');
+}
 
-  const handleClick = () => {
-    onClickVideo(creator);
-  };
+function getYouTubeEmbedUrl(url: string) {
+  const match = url.match(/(?:youtu\.be\/|v=|shorts\/)([a-zA-Z0-9_-]{11})/);
+  return match ? `https://www.youtube.com/embed/${match[1]}?autoplay=1&mute=1` : url;
+}
 
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (videoRef.current) {
-      const next = !muted;
-      videoRef.current.muted = next;
-      setMuted(next);
-    }
-  };
+function getInstagramEmbedUrl(url: string) {
+  const match = url.match(/\/(p|reel|reels)\/([A-Za-z0-9_-]+)/);
+  return match ? `https://www.instagram.com/${match[1]}/${match[2]}/embed/captioned/` : url;
+}
 
-  // Get first name for public view
-  const firstName = creator.name ? creator.name.split(' ')[0] : 'Creator';
-
-  const isInstagram = creator.videoFile?.includes('instagram.com/reel/') || creator.videoFile?.includes('instagram.com/p/');
-
-  const getInstagramId = (url: string) => {
-    try {
-      const parts = url.split('/');
-      const index = parts.findIndex(p => p === 'reel' || p === 'p');
-      if (index !== -1 && index + 1 < parts.length) {
-        return parts[index + 1].split('?')[0];
-      }
-      return '';
-    } catch (e) {
-      return '';
-    }
-  };
-
-  const instagramId = isInstagram ? getInstagramId(creator.videoFile) : '';
-  const instagramCoverUrl = instagramId ? `https://www.instagram.com/p/${instagramId}/media/?size=l` : '';
-
+/** Resolve video src for local files vs remote URLs */
+function resolveVideoSrc(videoUrl: string): string {
+  if (!videoUrl) return '';
+  if (videoUrl.startsWith('http')) return videoUrl;
   const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const videoSrc = creator.videoFile
-    ? (creator.videoFile.startsWith('http')
-        ? creator.videoFile
-        : (isLocalhost
-            ? `/videos/${creator.videoFile}`
-            : `${GITHUB_VIDEO_BASE}/${creator.videoFile}`))
-    : '';
+  return isLocalhost
+    ? `/videos/${videoUrl}`
+    : `${GITHUB_VIDEO_BASE}/${videoUrl}`;
+}
+
+/** Backward compat: convert old single-video creators to reels[] shape at runtime */
+function normalizeCreator(c: Creator): Creator {
+  if (c.videoUrl && (!c.reels || c.reels.length === 0)) {
+    return {
+      ...c,
+      reels: [{
+        id: `${c.id}_reel0`,
+        label: 'Demo Reel',
+        videoUrl: c.videoUrl,
+        views: c.avgViews,
+      }],
+    };
+  }
+  return c;
+}
+
+// ── ReelPlayer ────────────────────────────────────────────────────
+
+interface ReelPlayerProps {
+  reel: Reel;
+  autoPlay?: boolean;
+  previewMode?: boolean;
+}
+
+function ReelPlayer({ reel, autoPlay = false, previewMode = false }: ReelPlayerProps) {
+  const [fallbackSrc, setFallbackSrc] = useState('');
+  const [isMuted, setIsMuted] = useState(true);
+
+  if (isInstagramUrl(reel.videoUrl)) {
+    return (
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        {previewMode && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }} />
+        )}
+        <iframe
+          src={getInstagramEmbedUrl(reel.videoUrl)}
+          title={reel.label}
+          frameBorder="0"
+          scrolling="no"
+          allowTransparency
+          allow="encrypted-media"
+          style={{ width: '100%', height: '100%', border: 'none', background: '#000', pointerEvents: previewMode ? 'none' : 'auto' }}
+        />
+      </div>
+    );
+  }
+
+  if (isYouTubeUrl(reel.videoUrl)) {
+    return (
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        {previewMode && (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, cursor: 'pointer' }} />
+        )}
+        <iframe
+          src={getYouTubeEmbedUrl(reel.videoUrl)}
+          title={reel.label}
+          frameBorder="0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          style={{ width: '100%', height: '100%', border: 'none', background: '#000', pointerEvents: previewMode ? 'none' : 'auto' }}
+        />
+      </div>
+    );
+  }
+
+  const primarySrc = resolveVideoSrc(reel.videoUrl);
+  const src = fallbackSrc || primarySrc;
 
   return (
-    <div className={`creator-card ${isAddedToCampaign ? 'creator-card--selected' : ''}`}>
-      <motion.div
-        layoutId={`creator-video-wrap-${creator.id}`}
-        className="creator-card__video-wrap"
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={handleClick}
-      >
-        {creator.videoFile ? (
-          <>
-            {/* Loading spinner — shown until first frame is ready */}
-            {!videoLoaded && (
-              <div className="creator-card__loader">
-                <div className="creator-card__spinner"></div>
-              </div>
-            )}
-
-            {isInstagram ? (
-              <img
-                src={instagramCoverUrl}
-                alt={`${creator.name} Cover`}
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                onLoad={() => setVideoLoaded(true)}
-              />
-            ) : (
-              <video
-                ref={videoRef}
-                preload="metadata"
-                loop
-                playsInline
-                muted
-                style={{ opacity: videoLoaded ? 1 : 0, transition: 'opacity 0.3s ease' }}
-                onLoadedData={() => setVideoLoaded(true)}
-              >
-                <source
-                  src={videoSrc}
-                  type={creator.videoFile.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4'}
-                />
-                {!creator.videoFile.startsWith('http') && (
-                  <>
-                    <source src={`/videos/${creator.videoFile}`} type="video/mp4" />
-                    <source src={`${GITHUB_VIDEO_BASE}/${creator.videoFile}`} type="video/mp4" />
-                  </>
-                )}
-              </video>
-            )}
-
-            {/* Play overlay */}
-            {(isInstagram || (videoLoaded && !playing)) && (
-              <div className="creator-card__play-overlay">
-                <div className="creator-card__play-btn">
-                  <svg width="14" height="16" viewBox="0 0 14 16" fill="none">
-                    <path d="M1 1L13 8L1 15V1Z" fill="#111111"/>
-                  </svg>
-                </div>
-              </div>
-            )}
-
-            {/* Mute toggle — only visible when playing */}
-            {!isInstagram && playing && (
-              <button className="creator-card__mute-btn" onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'}>
-                {muted ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                    <line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                  </svg>
-                )}
-              </button>
-            )}
-          </>
-        ) : (
-          <div className="creator-card__placeholder">
-            <svg width="20" height="24" viewBox="0 0 20 24" fill="none">
-              <path d="M1 1L19 12L1 23V1Z" fill="#444" strokeLinejoin="round"/>
-            </svg>
-          </div>
-        )}
-
-        {/* Delete button badge shown in Admin View */}
-        {isAdminView && (
-          <button
-            className="creator-card__delete-badge"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(creator.id);
-            }}
-            title="Delete Creator"
-          >
-            <Trash2 size={14} />
-          </button>
-        )}
-      </motion.div>
-
-      <div className="creator-card__info">
-        {/* Creator Name Section */}
-        <div className="creator-card__name-container">
-          {isAdminView ? (
-            <>
-              <input
-                type="text"
-                className="creator-card__name-input"
-                value={creator.name}
-                onChange={(e) => onUpdateName(creator.id, e.target.value)}
-                onClick={(e) => e.stopPropagation()}
-                placeholder="Creator Name"
-              />
-              <span className="creator-card__handle">
-                {creator.handle}
-              </span>
-            </>
-          ) : (
-            <span className="creator-card__name" title={firstName}>
-              {firstName}
-            </span>
-          )}
-        </div>
-
-        <div className="creator-card__stats">
-          <div className="stat-item">
-            <span className="stat-label">Followers</span>
-            <span className="stat-value">{creator.followers || 'N/A'}</span>
-          </div>
-          <div className="stat-item">
-            <span className="stat-label">Avg Views</span>
-            <span className="stat-value">{creator.avgViews || 'N/A'}</span>
-          </div>
-        </div>
-
-        {isAdminView && creator.niches.length > 0 && (
-          <div className="creator-card__niches">
-            {creator.niches.slice(0, 3).map((n) => (
-              <span key={n} className="niche-tag">{n}</span>
-            ))}
-            {creator.niches.length > 3 && (
-              <span className="niche-tag niche-tag--more">+{creator.niches.length - 3}</span>
-            )}
-          </div>
-        )}
-
-        {/* Add to Campaign Button (Only shown in Public View) */}
-        {!isAdminView && (
-          <button
-            type="button"
-            className={`creator-card__campaign-btn ${isAddedToCampaign ? 'creator-card__campaign-btn--added' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleCampaign(creator);
-            }}
-          >
-            {isAddedToCampaign ? (
-              <>
-                <Check size={13} strokeWidth={3} />
-                <span>Added</span>
-              </>
-            ) : (
-              <>
-                <Plus size={13} strokeWidth={3} />
-                <span>Add to Campaign</span>
-              </>
-            )}
-          </button>
-        )}
-      </div>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+      <video
+        key={src}
+        src={src}
+        controls={!previewMode}
+        muted={previewMode ? isMuted : undefined}
+        loop
+        playsInline
+        autoPlay={autoPlay}
+        style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+        onError={() => {
+          if (!fallbackSrc && !reel.videoUrl.startsWith('http')) {
+            setFallbackSrc(`${GITHUB_VIDEO_BASE}/${reel.videoUrl}`);
+          }
+        }}
+      />
+      {previewMode && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setIsMuted(!isMuted);
+          }}
+          style={{
+            position: 'absolute',
+            bottom: '8px',
+            right: '8px',
+            background: 'rgba(0,0,0,0.6)',
+            border: 'none',
+            borderRadius: '50%',
+            width: '32px',
+            height: '32px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'white',
+            cursor: 'pointer',
+            zIndex: 20
+          }}
+        >
+          {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+        </button>
+      )}
     </div>
   );
 }
+
+// ── ReelThumb ─────────────────────────────────────────────────────
+
+interface ReelThumbProps {
+  reel: Reel;
+  onClick: () => void;
+}
+
+function ReelThumb({ reel, onClick }: ReelThumbProps) {
+  return (
+    <button
+      type="button"
+      className="reel-thumb"
+      onClick={onClick}
+    >
+      <div className="reel-thumb__container" style={{ position: 'relative', overflow: 'hidden', borderRadius: '8px' }}>
+        {reel.videoUrl ? (
+          <div className="reel-thumb__preview" style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
+            <ReelPlayer reel={reel} autoPlay={true} previewMode={true} />
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10 }} />
+          </div>
+        ) : reel.thumbnailUrl ? (
+          <img
+            src={reel.thumbnailUrl}
+            alt={reel.label}
+            className="reel-thumb__img"
+          />
+        ) : (
+          <div className="reel-thumb__placeholder">
+            <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+              <path d="M2 2L22 14L2 26V2Z" fill="white" fillOpacity="0.7" />
+            </svg>
+          </div>
+        )}
+        {/* Views badge */}
+        <div className="reel-thumb__views-badge">
+          <Play size={10} fill="white" stroke="white" />
+          <span>{reel.views} views</span>
+        </div>
+        {/* Hover overlay */}
+        <div className="reel-thumb__hover">
+          <div className="reel-thumb__play-circle">
+            <svg width="16" height="18" viewBox="0 0 16 18" fill="none">
+              <path d="M1 1L15 9L1 17V1Z" fill="white" />
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div className="reel-thumb__info">
+        <span className="reel-thumb__label">{reel.label}</span>
+        {reel.likes && (
+          <span className="reel-thumb__likes">{reel.likes} likes</span>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ── ExpandedView ──────────────────────────────────────────────────
+
+interface ExpandedViewProps {
+  creator: Creator;
+  inCampaign: boolean;
+  onToggleCampaign: () => void;
+  onClose: () => void;
+  isAdminView?: boolean;
+  followersStr: string;
+  viewsStr: string;
+  setFollowersStr: (val: string) => void;
+  setViewsStr: (val: string) => void;
+}
+
+function ExpandedView({ creator, inCampaign, onToggleCampaign, onClose, isAdminView, followersStr, viewsStr, setFollowersStr, setViewsStr }: ExpandedViewProps) {
+  const [activeReel, setActiveReel] = useState<Reel | null>(null);
+
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  return (
+    <>
+      {/* Main expanded panel */}
+      <motion.div
+        className="expanded-overlay"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.2 }}
+        onClick={handleBackdropClick}
+      >
+        <motion.div
+          className="expanded-panel"
+          initial={{ opacity: 0, y: 40, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 40, scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Sticky header */}
+          <div className="expanded-header">
+            <div className="expanded-header__info">
+              <h2 className="expanded-header__name">{creator.name}</h2>
+              {creator.handle && (
+                <a
+                  href={creator.profileUrl || `https://instagram.com/${creator.handle}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="expanded-header__handle"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  @{creator.handle}
+                </a>
+              )}
+            </div>
+            <button
+              type="button"
+              className="expanded-header__close"
+              onClick={onClose}
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Stats bar */}
+          <div className="expanded-stats">
+            <div className="expanded-stats__item">
+              <span className="expanded-stats__label">Followers</span>
+              <span className="expanded-stats__value">{followersStr}</span>
+            </div>
+            {creator.engagementRate && (
+              <>
+                <span className="expanded-stats__dot">·</span>
+                <div className="expanded-stats__item">
+                  <span className="expanded-stats__label">Engagement</span>
+                  <span className="expanded-stats__value">{creator.engagementRate}</span>
+                </div>
+              </>
+            )}
+            <div className="expanded-stats__niches">
+              {creator.niches.slice(0, 4).map((n) => (
+                <span key={n} className="expanded-niche-pill">{n}</span>
+              ))}
+              {creator.niches.length > 4 && (
+                <span className="expanded-niche-pill expanded-niche-pill--more">
+                  +{creator.niches.length - 4}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Single Video Section */}
+          {creator.reels && creator.reels.length > 0 && (
+            <div className="expanded-reels" style={{ marginTop: '16px' }}>
+              <div style={{ width: '100%', aspectRatio: '9/16', maxHeight: '500px', borderRadius: '12px', overflow: 'hidden', margin: '0 auto', background: '#000' }}>
+                <ReelPlayer reel={creator.reels[0]} autoPlay={true} />
+              </div>
+            </div>
+          )}
+
+          {/* Sticky footer */}
+          {!isAdminView && (
+            <div className="expanded-footer">
+              <button
+                type="button"
+                className={`expanded-footer__btn ${inCampaign ? 'expanded-footer__btn--added' : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleCampaign();
+                }}
+              >
+                {inCampaign ? (
+                  <>
+                    <Check size={16} strokeWidth={3} />
+                    <span>Added to Campaign</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus size={16} strokeWidth={2} />
+                    <span>Add to Campaign</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </motion.div>
+      </motion.div>
+    </>
+  );
+}
+
+// ── CreatorCard (compact card) ────────────────────────────────────
+
+interface CreatorCardProps {
+  creator: Creator;
+  inCampaign: boolean;
+  onToggleCampaign: (creator: Creator) => void;
+  isAdminView?: boolean;
+  onUpdateName?: (id: string, newName: string) => void;
+  onDelete?: (id: string) => void;
+  onEdit?: (creator: Creator) => void;
+}
+
+export const CreatorCard = memo(function CreatorCard({
+  creator: rawCreator,
+  inCampaign,
+  onToggleCampaign,
+  isAdminView = false,
+  onUpdateName,
+  onDelete,
+  onEdit
+}: CreatorCardProps) {
+  const creator = normalizeCreator(rawCreator);
+  const [expanded, setExpanded] = useState(false);
+  const firstReel = creator.reels?.[0];
+
+  const [followersStr, setFollowersStr] = useState(() => localStorage.getItem(`creator_followers_${creator.id}`) || creator.followers);
+  const [viewsStr, setViewsStr] = useState(() => localStorage.getItem(`creator_views_${creator.id}`) || creator.avgViews);
+
+  const handleCardClick = () => {
+    setExpanded(true);
+  };
+
+  return (
+    <>
+      <div
+        className={`cc ${inCampaign ? 'cc--selected' : ''}`}
+        onClick={handleCardClick}
+      >
+        {/* Thumbnail area */}
+        <div className="cc__thumb">
+          {firstReel?.videoUrl ? (
+            <div className="cc__preview-wrapper" style={{ width: '100%', height: '100%' }}>
+              <ReelPlayer reel={firstReel} autoPlay={true} previewMode={true} />
+            </div>
+          ) : firstReel?.thumbnailUrl ? (
+            <img
+              src={firstReel.thumbnailUrl}
+              alt={creator.name}
+              className="cc__thumb-img"
+            />
+          ) : (
+            <div className="cc__thumb-placeholder">
+              <svg width="20" height="24" viewBox="0 0 20 24" fill="none">
+                <path d="M1 1L19 12L1 23V1Z" fill="white" fillOpacity="0.5" />
+              </svg>
+            </div>
+          )}
+
+          {/* Admin: Edit badge (Top Right) */}
+          {isAdminView && onEdit && (
+            <button
+              className="creator-card__edit-badge"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit(creator);
+              }}
+              title="Edit Creator"
+              style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(255, 255, 255, 0.9)', color: '#111', border: 'none', borderRadius: '50%', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.15)', zIndex: 10 }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>
+            </button>
+          )}
+
+          {/* Admin: Delete badge (Top Left) */}
+          {isAdminView && onDelete && (
+            <button
+              className="creator-card__delete-badge"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(creator.id);
+              }}
+              title="Delete Creator"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Info section */}
+        <div className="cc__info">
+          <div className="cc__name-row">
+            <span className="cc__name">{creator.name}</span>
+            {isAdminView && creator.handle && <span className="cc__handle">@{creator.handle}</span>}
+          </div>
+          <div className="cc__stats-line">
+            <span>{followersStr} followers</span>
+          </div>
+        </div>
+
+        {/* CTA button */}
+        {!isAdminView && (
+          <div className="cc__cta" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`cc__campaign-btn ${inCampaign ? 'cc__campaign-btn--added' : ''}`}
+              onClick={() => onToggleCampaign(creator)}
+            >
+              {inCampaign ? (
+                <>
+                  <Check size={13} strokeWidth={3} />
+                  <span>Added</span>
+                </>
+              ) : (
+                <>
+                  <Plus size={13} strokeWidth={3} />
+                  <span>Add to Campaign</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Expanded view portal */}
+      <AnimatePresence>
+        {expanded && (
+          <ExpandedView
+            creator={creator}
+            inCampaign={inCampaign}
+            onToggleCampaign={() => onToggleCampaign(creator)}
+            onClose={() => setExpanded(false)}
+            isAdminView={isAdminView}
+            followersStr={followersStr}
+            viewsStr={viewsStr}
+            setFollowersStr={setFollowersStr}
+            setViewsStr={setViewsStr}
+          />
+        )}
+      </AnimatePresence>
+    </>
+  );
+}, (prev, next) => {
+  return prev.creator.id === next.creator.id && 
+         prev.inCampaign === next.inCampaign && 
+         prev.isAdminView === next.isAdminView &&
+         prev.creator.name === next.creator.name;
+});
