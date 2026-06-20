@@ -4,6 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import { spawn } from 'child_process'
+import https from 'node:https'
+import http from 'node:http'
+import dotenv from 'dotenv'
+
+dotenv.config({ path: '.env.local' })
 
 function apiPlugin() {
   return {
@@ -57,55 +62,140 @@ function apiPlugin() {
           return;
         }
 
-        if (req.url === '/api/download-reel' && req.method === 'POST') {
+        // --- RAPIDAPI QUICK FETCH FOR "FETCH DETAILS" BUTTON ---
+        if (req.url === '/api/fetch-profile' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk.toString(); });
+          req.on('end', async () => {
+            try {
+              const { profileUrl } = JSON.parse(body);
+              const handleMatch = profileUrl.match(/instagram\.com\/([^\/]+)/);
+              if (!handleMatch) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ success: false, error: 'Invalid URL' }));
+              }
+              const fetchRes = await fetch(profileUrl);
+              const html = await fetchRes.text();
+              
+              const descMatch = html.match(/<meta property="og:description" content="([^"]+)"/);
+              const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
+              
+              if (descMatch && titleMatch) {
+                const desc = descMatch[1];
+                const title = titleMatch[1];
+                
+                const fMatch = desc.match(/^([\d,.]+M?K?)\s+Followers/i);
+                const nMatch = title.match(/^(.+?)\s*\(&#064;/);
+                
+                let followersStr = fMatch ? fMatch[1] : '';
+                let nameStr = nMatch ? nMatch[1].trim() : 'Unknown';
+                
+                // Decode HTML entities
+                nameStr = nameStr.replace(/&#(x)?([a-zA-Z0-9]+);/g, (match, isHex, val) => {
+                  return String.fromCodePoint(parseInt(val, isHex ? 16 : 10));
+                }).replace(/&amp;/g, '&');
+                
+                // Format numbers like 7,013 -> 7K
+                if (followersStr.includes(',')) {
+                  const num = parseInt(followersStr.replace(/,/g, ''), 10);
+                  if (num >= 1000000) followersStr = (num / 1000000).toFixed(1) + 'M';
+                  else if (num >= 1000) followersStr = (num / 1000).toFixed(1) + 'K';
+                }
+                
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                  success: true,
+                  name: nameStr,
+                  followers: followersStr
+                }));
+              } else {
+                throw new Error('Could not parse Instagram profile. Is the account private?');
+              }
+            } catch (e: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ success: false, error: e.message }));
+            }
+          });
+          return;
+        }
+
+        // --- APIFY AUTOMATED SCRAPING TRIGGER ---
+        if (req.url === '/api/process-creator' && req.method === 'POST') {
           let body = '';
           req.on('data', chunk => { body += chunk; });
           req.on('end', () => {
             try {
-              const { url } = JSON.parse(body);
-              if (!url) {
+              const { profileUrl, reelUrl } = JSON.parse(body);
+              if (!profileUrl) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: 'Missing Instagram URL' }));
+                res.end(JSON.stringify({ error: 'Missing profileUrl' }));
                 return;
               }
-              const scriptPath = path.resolve(__dirname, 'scripts/download_reel.py');
-              const pyProcess = spawn('python3', [scriptPath, url]);
-              let stdoutData = '';
-              let stderrData = '';
+
+              const apifyToken = process.env.VITE_APIFY_TOKEN;
+              const apifyActorId = 'potent_sarod~instagram-supabase-pipeline';
               
-              pyProcess.stdout.on('data', data => { stdoutData += data; });
-              pyProcess.stderr.on('data', data => { stderrData += data; });
+              if (!apifyToken || !apifyActorId) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Apify credentials missing in .env.local' }));
+                return;
+              }
+
+              // Read latest supabase credentials directly from file to bypass Vite cache
+              const envText = fs.readFileSync('.env.local', 'utf8');
+              const supaUrlMatch = envText.match(/^VITE_SUPABASE_URL=(.*)$/m);
+              const supaKeyMatch = envText.match(/^VITE_SUPABASE_ANON_KEY=(.*)$/m);
               
-              pyProcess.on('error', err => {
-                console.error('Failed to spawn download_reel.py:', err);
-                if (!res.writableEnded) {
-                  res.writeHead(500, { 'Content-Type': 'application/json' });
-                  res.end(JSON.stringify({ error: `Spawn error: ${err.message}` }));
-                }
+              const targetUrl = reelUrl && reelUrl.trim() !== '' ? reelUrl : profileUrl;
+              
+              const payload = JSON.stringify({
+                profileUrls: [targetUrl],
+                scrapeReels: true,
+                scrapeImages: false,
+                supabaseUrl: supaUrlMatch ? supaUrlMatch[1].trim() : '',
+                supabaseKey: supaKeyMatch ? supaKeyMatch[1].trim() : ''
               });
-              
-              pyProcess.on('close', code => {
-                if (res.writableEnded) return;
-                if (code === 0) {
-                  try {
-                    const result = JSON.parse(stdoutData.trim());
-                    if (result.success) {
-                      res.writeHead(200, { 'Content-Type': 'application/json' });
-                      res.end(JSON.stringify({ success: true, filename: result.filename }));
-                    } else {
-                      res.writeHead(500, { 'Content-Type': 'application/json' });
-                      res.end(JSON.stringify({ error: result.error || 'Failed to download Reel' }));
-                    }
-                  } catch (e) {
-                    res.writeHead(500, { 'Content-Type': 'application/json' });
-                    res.end(JSON.stringify({ error: `Parse error: ${stdoutData.trim()}` }));
+
+              // Call Apify API synchronously (waitForFinish=120)
+              const options = {
+                hostname: 'api.apify.com',
+                port: 443,
+                path: `/v2/acts/${apifyActorId}/runs?token=${apifyToken}&waitForFinish=120`,
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(payload)
+                }
+              };
+
+              const proxyReq = https.request(options, (proxyRes: any) => {
+                let proxyBody = '';
+                proxyRes.on('data', (chunk: any) => { proxyBody += chunk; });
+                proxyRes.on('end', () => {
+                  if (proxyRes.statusCode !== 201 && proxyRes.statusCode !== 200) {
+                     res.writeHead(500, { 'Content-Type': 'application/json' });
+                     res.end(JSON.stringify({ error: `Apify failed: ${proxyBody}` }));
+                     return;
                   }
-                } else {
-                  res.writeHead(500, { 'Content-Type': 'application/json' });
-                  res.end(JSON.stringify({ error: stderrData.trim() || 'Python script failed' }));
-                }
+                  
+                  // Now run the sync script
+                  const child = spawn('node', [path.join(__dirname, 'scripts/sync_supabase_creators.js')]);
+                  child.on('close', (code) => {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ success: true, message: 'Actor finished and sync complete' }));
+                  });
+                });
               });
-            } catch (err) {
+
+              proxyReq.on('error', (err: any) => {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: `Apify request failed: ${err.message}` }));
+              });
+
+              proxyReq.write(payload);
+              proxyReq.end();
+
+            } catch (err: any) {
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: err.message }));
             }
