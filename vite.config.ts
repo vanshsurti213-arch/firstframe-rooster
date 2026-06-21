@@ -62,7 +62,7 @@ function apiPlugin() {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ success: true, name: nameStr, followers: followersStr }));
               } else {
-                throw new Error('Could not parse Instagram profile. Is the account private?');
+                throw new Error('Instagram blocked the request. Please enter the Name and Followers manually.');
               }
             } catch (e: any) {
               res.writeHead(500, { 'Content-Type': 'application/json' });

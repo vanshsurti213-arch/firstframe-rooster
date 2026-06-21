@@ -54,9 +54,9 @@ export default async function handler(req, res) {
         followers: followersStr
       });
     } else {
-      return res.status(500).json({ success: false, error: 'Could not parse Instagram profile. Is the account private?' });
+      return res.status(500).json({ success: false, error: 'Instagram blocked the Vercel server IP. Please enter the Name and Followers manually.' });
     }
   } catch (e) {
-    return res.status(500).json({ success: false, error: e.message });
+    return res.status(500).json({ success: false, error: `Instagram blocked the Vercel server IP. Please enter the Name and Followers manually.` });
   }
 }
