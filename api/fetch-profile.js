@@ -15,7 +15,12 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid URL' });
     }
 
-    const fetchRes = await fetch(profileUrl);
+    let absoluteUrl = profileUrl;
+    if (!/^https?:\/\//i.test(absoluteUrl)) {
+      absoluteUrl = 'https://' + absoluteUrl;
+    }
+
+    const fetchRes = await fetch(absoluteUrl);
     const html = await fetchRes.text();
     
     const descMatch = html.match(/<meta property="og:description" content="([^"]+)"/);
