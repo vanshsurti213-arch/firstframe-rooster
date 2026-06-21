@@ -219,6 +219,14 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ profileUrl: newProfileUrl.trim() })
       });
+
+      // Check if response is actually JSON
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setModalError('Server returned an invalid response. Please try again or enter details manually.');
+        return;
+      }
+
       const data = await res.json();
       
       if (res.ok && data.success) {
