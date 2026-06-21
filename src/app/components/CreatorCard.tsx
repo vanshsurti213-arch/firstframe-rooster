@@ -1,4 +1,4 @@
-import { useState, memo } from 'react';
+import { useState, useRef, useEffect, memo } from 'react';
 import { Creator, Reel } from '../data/creators';
 import { Plus, Check, X, Play, Volume2, VolumeX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -62,6 +62,25 @@ interface ReelPlayerProps {
 function ReelPlayer({ reel, autoPlay = false, previewMode = false }: ReelPlayerProps) {
   const [fallbackSrc, setFallbackSrc] = useState('');
   const [isMuted, setIsMuted] = useState(true);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.defaultMuted = true;
+      if (previewMode) {
+        video.muted = isMuted;
+      }
+      if (autoPlay) {
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.log('Autoplay prevented:', err);
+          });
+        }
+      }
+    }
+  }, [autoPlay, isMuted, previewMode, reel.videoUrl]);
 
   if (isInstagramUrl(reel.videoUrl)) {
     return (
@@ -106,12 +125,16 @@ function ReelPlayer({ reel, autoPlay = false, previewMode = false }: ReelPlayerP
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <video
+        ref={videoRef}
         key={src}
         src={src}
         controls={!previewMode}
+        defaultMuted={previewMode ? true : undefined}
         muted={previewMode ? isMuted : undefined}
         loop
         playsInline
+        preload="auto"
+        poster={reel.thumbnailUrl || (reel as any).coverUrl}
         autoPlay={autoPlay}
         style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
         onError={() => {
