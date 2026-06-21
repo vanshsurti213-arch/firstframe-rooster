@@ -441,7 +441,7 @@ export const CreatorCard = memo(function CreatorCard({
         {/* Thumbnail area */}
         <div className="cc__thumb">
           {firstReel?.videoUrl ? (
-            <div className="cc__preview-wrapper" style={{ width: '100%', height: '100%' }}>
+            <div className="cc__preview-wrapper" style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
               <ReelPlayer reel={firstReel} autoPlay={true} previewMode={true} />
             </div>
           ) : firstReel?.thumbnailUrl ? (

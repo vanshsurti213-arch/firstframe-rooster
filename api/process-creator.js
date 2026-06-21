@@ -90,7 +90,7 @@ export default async function handler(req, res) {
           id: `reel_${row.post_id || row.id}`,
           label: 'Demo Reel',
           videoUrl: bestVideoUrl,
-          coverUrl: row.original_image_url || undefined
+          coverUrl: row.displayUrl || row.display_url || row.original_image_url || row.thumbnail_url || undefined
         });
       }
     }
