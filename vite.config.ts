@@ -33,6 +33,38 @@ function apiPlugin() {
                 absoluteUrl = 'https://' + absoluteUrl;
               }
               
+              const username = handleMatch[1];
+              const apifyToken = process.env.VITE_APIFY_TOKEN;
+
+              if (apifyToken) {
+                const apifyUrl = `https://api.apify.com/v2/acts/apify~instagram-profile-scraper/run-sync-get-dataset-items?token=${apifyToken}`;
+                
+                const apifyRes = await fetch(apifyUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ usernames: [username] })
+                });
+                
+                if (apifyRes.ok) {
+                  const data = await apifyRes.json();
+                  if (data && data.length > 0) {
+                    const profile = data[0];
+                    
+                    let followersStr = profile.followersCount;
+                    if (followersStr >= 1000000) followersStr = (followersStr / 1000000).toFixed(1) + 'M';
+                    else if (followersStr >= 1000) followersStr = (followersStr / 1000).toFixed(1) + 'K';
+                    else followersStr = followersStr.toString();
+                    
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    return res.end(JSON.stringify({ success: true, name: profile.fullName || username, followers: followersStr }));
+                  }
+                }
+              }
+
+              if (!/^https?:\/\//i.test(absoluteUrl)) {
+                absoluteUrl = 'https://' + absoluteUrl;
+              }
+              
               const fetchRes = await fetch(absoluteUrl);
               const html = await fetchRes.text();
               
