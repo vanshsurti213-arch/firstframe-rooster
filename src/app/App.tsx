@@ -387,15 +387,8 @@ export default function App() {
       let finalName = newName.trim();
       let finalFollowers = newFollowers.trim() || '—';
       
-      // Prepare reels: if editing existing creator, merge with previous reels
-      let reelsToSave = newReels;
-      if (editingCreator && editingCreator.reels) {
-        // Add new reels to the beginning of existing reels (newest first)
-        reelsToSave = [...newReels, ...editingCreator.reels];
-      }
-      
-      // Keep only the 10 newest reels (delete older ones)
-      reelsToSave = reelsToSave.slice(0, 10);
+      // Keep ONLY 1 reel per creator - new reel replaces old one
+      let reelsToSave = newReels.slice(0, 1);
       
       const updatedCreator: Creator = {
         id: editingCreator ? editingCreator.id : `creator_${Date.now()}`,
@@ -413,12 +406,6 @@ export default function App() {
           updatedList = creatorsList.map(c => c.id === editingCreator.id ? updatedCreator : c);
         } else {
           updatedList = [updatedCreator, ...creatorsList];
-        }
-        
-        // Check if this is aadirika and update their video URL if specified
-        if (finalName.toLowerCase().includes('aadirika') || cleanHandle?.toLowerCase() === 'aadirika') {
-          console.log("[v0] Updating aadirika with new video link");
-          // The new reel URL will be used automatically via reelsToSave
         }
   
         setCreatorsList(updatedList);
@@ -470,17 +457,6 @@ export default function App() {
     setNewReels(prev => prev.map((r, i) =>
       i === index ? { ...r, [field]: value } : r
     ));
-  };
-
-  // Function to manage reel history - keeps only newest and removes up to 10 older ones
-  const manageReelHistory = (creator: Creator): Reel[] => {
-    if (!creator.reels || creator.reels.length === 0) {
-      return [];
-    }
-    
-    // Keep only the 10 newest reels (delete older ones)
-    // This maintains a clean history while preserving recent content
-    return creator.reels.slice(0, 10);
   };
 
   const addReelEntry = () => {
