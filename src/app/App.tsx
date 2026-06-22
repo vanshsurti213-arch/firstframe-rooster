@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
-import { Creator, Reel } from './data/creators';
+import { Creator, Reel, creators as defaultCreators } from './data/creators';
 import { CreatorCard } from './components/CreatorCard';
 import { Plus, Check, AlertCircle, X, CheckSquare, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -85,7 +85,13 @@ export default function App() {
         setCreatorsList(parsed);
       } catch (e) {
         console.warn("Failed to load cloud creators", e);
-        triggerStatus('error', 'Failed to load creators from cloud storage.');
+        // Fallback to local creators data
+        const sorted = [...defaultCreators].sort((a: Creator, b: Creator) => {
+          const idA = parseInt(a.id.split('_')[1] || '0');
+          const idB = parseInt(b.id.split('_')[1] || '0');
+          return idB - idA;
+        });
+        setCreatorsList(sorted);
       }
     };
     const loadCampaigns = async () => {
