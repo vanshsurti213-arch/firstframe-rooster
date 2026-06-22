@@ -137,7 +137,12 @@ export default async function handler(req, res) {
         try {
           console.log(`Uploading to Cloudinary for ${username}...`);
           const cloudUrl = process.env.VITE_CLOUDINARY_URL.trim();
-          cloudinary.config({ cloudinary_url: cloudUrl });
+          const parsed = new URL(cloudUrl);
+          cloudinary.config({
+            cloud_name: parsed.hostname,
+            api_key: parsed.username,
+            api_secret: parsed.password
+          });
           
           const uploadRes = await cloudinary.uploader.upload(bestVideoUrl, {
             resource_type: 'video',
