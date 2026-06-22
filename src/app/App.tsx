@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 const NICHE_OPTIONS = [
   'Fashion', 'Makeup', 'Skincare', 'Wellness', 'Fitness',
-  'Hair', 'Body', 'Nails', 'Lifestyle', 'Food', 'Baby', 'Travel', 'Tech', 'Gaming', 'Finance',
+  'Hair', 'Nails', 'Lifestyle', 'Food', 'Travel', 'Tech', 'UGC', 'Unboxing', 'Gaming', 'Finance',
 ];
 
 const NICHE_ALL = 'All';
@@ -49,6 +49,8 @@ export default function App() {
   const [submittingCampaign, setSubmittingCampaign] = useState(false);
   const [selectedNiche, setSelectedNiche] = useState<string>(NICHE_ALL);
   const [isSyncingFollowers, setIsSyncingFollowers] = useState(false);
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   // Listen to popstate event to handle forward/backward path changes
   useEffect(() => {
@@ -579,6 +581,45 @@ export default function App() {
     setIsSyncingFollowers(false);
   };
 
+  // ── Drag & Drop handlers ────────────────────────────────────
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    setDraggedId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (id !== dragOverId) setDragOverId(id);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!draggedId || draggedId === targetId) {
+      setDraggedId(null);
+      setDragOverId(null);
+      return;
+    }
+    setCreatorsList(prev => {
+      const list = [...prev];
+      const fromIdx = list.findIndex(c => c.id === draggedId);
+      const toIdx = list.findIndex(c => c.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const [moved] = list.splice(fromIdx, 1);
+      list.splice(toIdx, 0, moved);
+      // persist order to Supabase silently
+      saveCreatorsToBackend(list).catch(console.error);
+      return list;
+    });
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedId(null);
+    setDragOverId(null);
+  };
+
   return (
     <div className="app-canvas">
       {/* Toast Alert */}
@@ -685,7 +726,24 @@ export default function App() {
           {creatorsList
             .filter(c => selectedNiche === NICHE_ALL || (c.niches && c.niches.some(n => n.toLowerCase() === selectedNiche.toLowerCase())))
             .map((creator) => (
-            <div key={creator.id} className="masonry-item">
+            <div
+              key={creator.id}
+              className="masonry-item"
+              draggable={isAdminView}
+              onDragStart={(e) => isAdminView && handleDragStart(e, creator.id)}
+              onDragOver={(e) => isAdminView && handleDragOver(e, creator.id)}
+              onDrop={(e) => isAdminView && handleDrop(e, creator.id)}
+              onDragEnd={handleDragEnd}
+              style={{
+                opacity: draggedId === creator.id ? 0.35 : 1,
+                outline: dragOverId === creator.id && draggedId !== creator.id
+                  ? '2px dashed #111' : 'none',
+                outlineOffset: '2px',
+                borderRadius: '16px',
+                transition: 'opacity 0.15s ease, outline 0.1s ease',
+                cursor: isAdminView ? 'grab' : 'default',
+              }}
+            >
               <CreatorCard
                 creator={creator}
                 inCampaign={campaignList.some((c) => c.id === creator.id)}
