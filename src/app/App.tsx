@@ -210,6 +210,9 @@ export default function App() {
     const campaignName = window.prompt("Please enter the name for this Campaign:");
     if (!campaignName) return; // User cancelled
     
+    const makerName = window.prompt("Please enter your name (who is making this sheet):");
+    if (!makerName) return; // User cancelled
+    
     setSubmittingCampaign(true);
     triggerStatus('success', 'Submitting shortlist to Google Sheets...');
 
@@ -220,7 +223,7 @@ export default function App() {
       let success = false;
       let errorMsg = '';
       
-      const payload = { campaignName, creators: campaignList };
+      const payload = { campaignName, makerName, creators: campaignList };
 
       if (webAppUrl) {
         // Direct client-side submission with no-cors to prevent CORS/redirect errors.
